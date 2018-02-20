@@ -10,6 +10,7 @@
 //#define AIO_USERNAME    "USERNAME"
 //#define AIO_KEY         "KEY"
 
+#define _DEBUG
 
 /************ Global State (you don't need to change this!) ******************/
 // Create an ESP8266 WiFiClient class to connect to the MQTT server.
@@ -24,13 +25,13 @@ Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO
 Adafruit_MQTT_Subscribe timeFeed = Adafruit_MQTT_Subscribe(&mqtt, "time/seconds");
 
 // Setup a feed called 'planets' for subscribing to which planets needs to turned on
-Adafruit_MQTT_Subscribe planetsFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/planets", MQTT_QOS_1);
+Adafruit_MQTT_Subscribe planetsFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/night-lamp.planets", MQTT_QOS_1);
 
 // Setup a feed called 'sun' for subscribing to changes to the sun-light status
-Adafruit_MQTT_Subscribe sunFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/sun", MQTT_QOS_1);
+Adafruit_MQTT_Subscribe sunFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/night-lamp.sun", MQTT_QOS_1);
 
 // Setup a feed called 'timeout' for subscribing to changes to the timeout in minutes
-Adafruit_MQTT_Subscribe timeoutFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/timeout", MQTT_QOS_1);
+Adafruit_MQTT_Subscribe timeoutFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/night-lamp.timeout", MQTT_QOS_1);
 
 //////////////// PLANETS ////////////
 
@@ -57,21 +58,28 @@ byte planets=0;
 
 ///////////////////////////////////
 
-//////////
+#ifdef _DEBUG
+
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
 #define OLED_RESET 1
-#define BUILT_IN_LED 2
+
 Adafruit_SSD1306 display(OLED_RESET);
+
+#endif
+
+
+#define BUILT_IN_LED 2
 
 
 /****************************** Console Display ***********************************/
 
-static uint line=0;
-void console_println(String str){
+void console_println(String str, uint32 delay){
+  
+#ifdef _DEBUG
+  static uint line=0;
   if (line>=32)
   {
     display.clearDisplay();
@@ -82,6 +90,13 @@ void console_println(String str){
   
   display.println(str);
   display.display();
+#else
+  Serial.println(str);  
+#endif
+}
+
+void console_println(String str){
+  console_println(str,0);
 }
 
 
@@ -136,13 +151,13 @@ String elapsedtime(){
   String time="";
 
   if (hour > 0)
-    time+=String(hour)+((hour>=10)?" hrs " : " hr ");
+    time+=String(hour)+" h";
 
   if (min > 0)
-    time+=String(min)+((hour>=10)?" mins " : " min ");
+    time+=String(min)+" m";
 
   if (sec > 0)
-    time+=String(sec)+((sec>=10)?" secs" : " sec");
+    time+=String(sec)+" s";
           
   return time;
 }
@@ -166,7 +181,8 @@ void onTimeCallback(uint32_t current) {
     {
       timeout = 0; // Timeout already called
       timeout_checkpoint=elapsed_time;
-      digitalWrite(BUILT_IN_LED, 1);
+      writereg(0);
+      digitalWrite(SUN_pin, LOW);  
       console_println("Timeout!");
       delay(1000);
     }
@@ -179,10 +195,10 @@ void onTimeCallback(uint32_t current) {
 /****************************** CALLBACKS - Lighting  ***********************************/
 void onPlanetsCallback(uint32 planets) {
   console_println("Planets " + String(planets));
-  if (planets>0)
-    digitalWrite(BUILT_IN_LED, 1);
-  else
-    digitalWrite(BUILT_IN_LED, 0);
+//  if (planets>0)
+//    digitalWrite(BUILT_IN_LED, 1);
+//  else
+//    digitalWrite(BUILT_IN_LED, 0);
 
   writereg(planets);    
   
@@ -192,9 +208,9 @@ void onPlanetsCallback(uint32 planets) {
 void onSunCallback(uint32 sun) {
   console_println("Sun " + String(sun));
   if (sun)
-      digitalWrite(SUN_pin, LOW);
+      digitalWrite(SUN_pin, HIGH);
     else
-      digitalWrite(SUN_pin, HIGH);  
+      digitalWrite(SUN_pin, LOW);  
   delay(500);  
 }
 
@@ -209,14 +225,18 @@ void writereg(byte lights)
 {
   byte bits=lights;
   digitalWrite(STCP_pin, LOW);
+  String bitString="";
   for (int i = 7; i>=0; i--)
   {
     digitalWrite(SHCP_pin, LOW);
     digitalWrite(DS_pin, (bits & 0x01)>0 );
     digitalWrite(SHCP_pin, HIGH);
-    bits = bits >> 1;
+    bitString+=((bits & 0x01)>0) ? "1":"0";
+    
+    bits = bits >> 1;        
   }
   digitalWrite(STCP_pin, HIGH);
+  console_println(bitString,1000);  
 }
 
 void setup() {
@@ -235,17 +255,18 @@ void setup() {
   digitalWrite(BUILT_IN_LED, 1);  //TURN OFF BUILT IN LED
 
   delay(10);
-  
+
+#ifdef _DEBUG
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x32)
   display.clearDisplay();
   display.setTextSize(1);
-  display.setTextColor(WHITE);  
-  console_println("Welcome");
-  delay(2000);
+  display.setTextColor(WHITE);
+#endif  
+  console_println("Welcome",2000);
 
   // Connect to WiFi access point.
   console_println("Connecting to ");
-  console_println(WLAN_SSID);
+  console_println(WLAN_SSID,500);
 //
 //WiFi.persistent(false);
 //WiFi.mode(WIFI_OFF);   // this is a temporary line, to be removed after SDK update to 1.5.4
